@@ -57,9 +57,7 @@ FILES = [
 ]
 
 for f in FILES:
-
     if not os.path.exists(f):
-
         with open(f, "w") as x:
             json.dump({}, x)
 
@@ -69,20 +67,22 @@ for f in FILES:
 GEMINI_MODEL = "gemini-2.5-flash"
 
 # =========================
+# ANALYSIS STATE (in-memory)
+# Tracks multi-timeframe chart collection per user
+# =========================
+analysis_state = {}
+
+# =========================
 # HELPERS
 # =========================
 def load(f):
-
     try:
-
         with open(f, "r") as x:
             return json.load(x)
-
     except:
         return {}
 
 def save(f, d):
-
     with open(f, "w") as x:
         json.dump(d, x, indent=4)
 
@@ -90,49 +90,38 @@ def save(f, d):
 # REGISTER USERS
 # =========================
 def register_user(uid):
-
     users = load("users.json")
-
     uid = str(uid)
-
     if uid not in users:
-
         users[uid] = {
             "joined": str(datetime.now())
         }
-
     save("users.json", users)
 
 # =========================
 # MAIN MENU
 # =========================
 def main_menu():
-
     markup = types.ReplyKeyboardMarkup(
         resize_keyboard=True
     )
-
     markup.row(
         "📊 Analyze Market",
         "💳 Buy Credits"
     )
-
     markup.row(
         "💰 My Balance",
         "📞 Support"
     )
-
     markup.row(
         "📢 Broadcast"
     )
-
     return markup
 
 # =========================
 # LIMIT MESSAGE
 # =========================
 def limit_message():
-
     return (
         "⚠️ Server busy or analysis temporarily unavailable.\n\n"
         "Please try again later."
@@ -142,35 +131,22 @@ def limit_message():
 # SAFE SEND
 # FIX TOO LONG ERROR
 # =========================
-def safe_send(
-    chat_id,
-    text,
-    reply_markup=None
-):
-
+def safe_send(chat_id, text, reply_markup=None):
     MAX = 4000
-
     if len(text) <= MAX:
-
         bot.send_message(
             chat_id,
             text,
             reply_markup=reply_markup
         )
-
         return
 
     parts = [
-        text[i:i+MAX]
-        for i in range(
-            0,
-            len(text),
-            MAX
-        )
+        text[i:i + MAX]
+        for i in range(0, len(text), MAX)
     ]
 
     for part in parts:
-
         bot.send_message(
             chat_id,
             part,
@@ -181,164 +157,135 @@ def safe_send(
 # CREDIT SYSTEM
 # =========================
 def get_credit(uid):
-
-    return load(
-        "credits.json"
-    ).get(str(uid), 0)
+    return load("credits.json").get(str(uid), 0)
 
 def add_credit(uid, amt):
-
     data = load("credits.json")
-
     uid = str(uid)
-
     data[uid] = data.get(uid, 0) + amt
-
     save("credits.json", data)
 
 def use_credit(uid):
-
     data = load("credits.json")
-
     uid = str(uid)
-
     if data.get(uid, 0) > 0:
-
         data[uid] -= 1
-
         save("credits.json", data)
-
         return True
-
     return False
 
 # =========================
 # FREE TRIAL
 # FIRST TIME ONLY
 # =========================
-FREE_LIMIT = 2
+FREE_LIMIT = 1
 
 def get_free_used(uid):
-
     data = load("free_trial.json")
-
     return data.get(str(uid), 0)
 
 def can_use_free(uid):
-
     return get_free_used(uid) < FREE_LIMIT
 
 def use_free(uid):
-
     data = load("free_trial.json")
-
     uid = str(uid)
-
     data[uid] = data.get(uid, 0) + 1
-
     save("free_trial.json", data)
 
 # =========================
 # HUMAN EFFECT
 # =========================
 def human_delay(chat_id, sec=1):
-
-    bot.send_chat_action(
-        chat_id,
-        "typing"
-    )
-
+    bot.send_chat_action(chat_id, "typing")
     time.sleep(sec)
 
 # =========================
-# GEMINI CALL
+# CLEANUP TEMP FILES
 # =========================
-def call_gemini(
-    prompt,
-    image_base64
-):
+def cleanup_files(*paths):
+    for path in paths:
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except:
+            pass
 
+# =========================
+# GEMINI CALL (MULTI-IMAGE)
+# =========================
+def call_gemini(prompt, image_base64_list):
     try:
+        contents = [prompt]
+        for b64 in image_base64_list:
+            contents.append({
+                "inline_data": {
+                    "mime_type": "image/jpeg",
+                    "data": b64
+                }
+            })
 
         response = client.models.generate_content(
             model=GEMINI_MODEL,
-            contents=[
-                prompt,
-                {
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": image_base64
-                    }
-                }
-            ]
+            contents=contents
         )
 
         if response.text:
             return response.text
 
     except Exception as e:
-
-        print(
-            "Gemini Error:",
-            e
-        )
+        print("Gemini Error:", e)
 
     return None
 
 # =========================
-# AI ANALYSIS
+# AI ANALYSIS (MULTI-TIMEFRAME)
 # =========================
-def analyze_market(
-    message,
-    file_info
-):
-
+def analyze_market(message, htf_path, ltf_path):
     try:
-
-        file = bot.download_file(
-            file_info.file_path
-        )
-
-        path = f"""
-chart_{message.chat.id}.jpg
-""".strip()
-
-        with open(path, "wb") as f:
-            f.write(file)
-
         prompt = """
-You are an elite institutional forex trader and Smart Money Concepts expert.
+You are an elite institutional forex trader and Smart Money Concepts (SMC) / ICT expert working at a top-tier hedge fund.
 
-Analyze this forex chart professionally using:
-- Smart Money Concepts (SMC)
-- ICT concepts
-- Liquidity theory
-- Institutional order flow
-- Market structure
+You will receive TWO charts in this exact order:
+1. HIGHER TIMEFRAME chart (HTF)
+2. LOWER TIMEFRAME chart (LTF)
 
-IMPORTANT RULES:
+STRICT ANALYSIS ORDER:
+
+STEP 1 — HIGHER TIMEFRAME (Primary Bias)
+- Determine overall trend and institutional bias
+- Identify Market Structure (HH, HL, LH, LL)
+- Detect Break of Structure (BOS) and Change of Character (CHoCH)
+- Map major Liquidity pools (Equal Highs/Lows, buy-side & sell-side liquidity)
+- Identify Order Blocks (bullish & bearish)
+- Spot Fair Value Gaps (FVG / Imbalances)
+- Determine Premium / Discount zones relative to the dealing range
+- Note any Breaker Blocks, Mitigation Blocks, or Inducement
+- Assess Institutional Order Flow
+
+STEP 2 — LOWER TIMEFRAME (Confirmation & Entry Only)
+- Use LTF strictly for confirmation of the HTF bias and precise entry
+- Look for alignment: LTF structure, liquidity sweep, order block, FVG, or inducement that supports the HTF direction
+- If LTF shows clear opposing structure or strong counter bias → NO TRADE
+
+CRITICAL RULES:
+- Accuracy is more important than frequency
+- NEVER force a trade
+- If HTF and LTF disagree → Return NO TRADE ⛔
+- If setup is weak, unclear, low probability, or missing clear entry/SL/TP → Return NO TRADE ⛔
+- Do not guess. If confidence is not high enough for a clean institutional setup → NO TRADE
+- Only give BUY or SELL when both timeframes align and a high-probability setup is present
+
+OUTPUT RULES:
 - DO NOT use markdown symbols like ** or *
 - Use clean Telegram-friendly formatting
 - Use professional emojis correctly
 - Keep spacing clean and premium
-- Avoid confusing explanations
-- Make the analysis understandable even for beginners
 - Sound like a professional hedge fund analyst
-- Be direct and accurate
-- ALWAYS give one final signal:
-BUY / SELL / NO TRADE
+- Be direct and precise
+- Always give one final signal: BUY / SELL / NO TRADE
 
-VERY IMPORTANT:
-If the setup is weak or unclear:
-→ Return NO TRADE
-
-If buyers are dominant:
-→ Return BUY
-
-If sellers are dominant:
-→ Return SELL
-
-STRICT FORMAT:
+STRICT OUTPUT FORMAT (follow exactly):
 
 ━━━━━━━━━━━━━━━━━━
 🚀 AMUDANCE FX
@@ -346,111 +293,122 @@ STRICT FORMAT:
 
 📈 MARKET ANALYSIS
 
-🕒 Timeframe:
-Mention timeframe clearly.
+🕒 Higher Timeframe Bias
+(Explain HTF structure, trend, and institutional bias clearly)
 
-📊 Market Direction:
+🕒 Lower Timeframe Confirmation
+(Explain whether LTF confirms or rejects the HTF bias)
+
+📊 Market Direction
 Bullish 📈 / Bearish 📉 / Ranging 🔄
 
-🏗 Market Structure:
-Explain BOS or CHoCH simply.
+🏗 Market Structure
+(Explain BOS / CHoCH on both timeframes simply)
 
-💧 Liquidity Zones:
-Show major liquidity clearly.
+💧 Liquidity Analysis
+(Major liquidity pools, equal highs/lows, inducement)
 
-🏦 Institutional Bias:
-Explain smart money direction.
+🏦 Institutional Bias
+(Smart money direction based on HTF)
 
-🎯 Trade Setup:
-Explain setup clearly.
+📦 Order Blocks
+(Key bullish/bearish order blocks relevant to the setup)
 
-📥 Entry Zone:
-Give exact entry.
+🟨 Fair Value Gap
+(Relevant FVGs that may act as targets or entries)
 
-🛑 Stop Loss:
-Give exact SL.
+📍 Premium / Discount
+(Where price is relative to the dealing range)
 
-💰 Take Profit Targets:
+🎯 Trade Setup
+(Clear explanation of the setup)
+
+📥 Entry Zone
+(Exact zone or level)
+
+🛑 Stop Loss
+(Exact level)
+
+💰 Take Profit
 TP1:
 TP2:
 TP3:
 
-⚠️ Risk Level:
+⚖️ Risk : Reward
+(e.g. 1:2, 1:3, etc.)
+
+🔥 Confidence (%)
+(e.g. 75%)
+
+⚠️ Risk Level
 Low / Moderate / High
 
-🔥 Confidence Level:
-Low / Moderate / High
-
-📌 Trading Signal:
+📌 Final Signal
 BUY 📈
 SELL 📉
 or
 NO TRADE ⛔
 
-🧠 Professional Advice:
-Give short professional advice.
+🧠 Professional Advice
+(Short professional advice)
 
 ━━━━━━━━━━━━━━━━━━
-⚠️ Trade responsibly
+⚠️ Trade Responsibly
 ━━━━━━━━━━━━━━━━━━
+
+If the final signal is NO TRADE, still fill the analysis sections honestly but clearly state why no trade is taken. Do not invent entry, SL, or TP levels when the signal is NO TRADE.
 """
 
         bot.send_message(
             message.chat.id,
-            "📡 Upload received..."
+            "📡 Both charts received..."
         )
-
         human_delay(message.chat.id)
 
         bot.send_message(
             message.chat.id,
-            "🧠 AI analyzing chart..."
+            "🧠 Analyzing Higher Timeframe bias..."
         )
-
         human_delay(message.chat.id)
 
         bot.send_message(
             message.chat.id,
-            "📊 Processing market structure..."
+            "📉 Checking Lower Timeframe confirmation..."
         )
-
         human_delay(message.chat.id)
 
         bot.send_message(
             message.chat.id,
-            "💧 Detecting liquidity zones..."
+            "📊 Mapping market structure & liquidity..."
         )
-
         human_delay(message.chat.id)
 
         bot.send_message(
             message.chat.id,
-            "🏦 Tracking institutional flow..."
+            "🏦 Tracking institutional order flow..."
         )
-
         human_delay(message.chat.id)
 
-        with open(path, "rb") as f:
+        image_base64_list = []
 
-            image_bytes = f.read()
+        with open(htf_path, "rb") as f:
+            image_base64_list.append(
+                base64.b64encode(f.read()).decode()
+            )
 
-        image_base64 = base64.b64encode(
-            image_bytes
-        ).decode()
+        with open(ltf_path, "rb") as f:
+            image_base64_list.append(
+                base64.b64encode(f.read()).decode()
+            )
 
-        result = call_gemini(
-            prompt,
-            image_base64
-        )
+        result = call_gemini(prompt, image_base64_list)
 
         if not result:
-
             bot.send_message(
                 message.chat.id,
                 limit_message(),
                 reply_markup=main_menu()
             )
-
             return
 
         safe_send(
@@ -459,33 +417,26 @@ Give short professional advice.
             reply_markup=main_menu()
         )
 
-        try:
-            os.remove(path)
-        except:
-            pass
-
     except Exception as e:
-
-        print(
-            "Analysis Error:",
-            e
-        )
-
+        print("Analysis Error:", e)
         bot.send_message(
             message.chat.id,
             limit_message(),
             reply_markup=main_menu()
         )
 
+    finally:
+        cleanup_files(htf_path, ltf_path)
+
 # =========================
 # START
 # =========================
-@bot.message_handler(
-    commands=['start']
-)
+@bot.message_handler(commands=['start'])
 def start(m):
-
     register_user(m.chat.id)
+
+    # Clear any incomplete analysis state
+    analysis_state.pop(str(m.chat.id), None)
 
     bot.send_message(
         m.chat.id,
@@ -511,11 +462,9 @@ Choose an option below 👇
 # BUY CREDITS
 # =========================
 @bot.message_handler(
-    func=lambda m:
-    m.text == "💳 Buy Credits"
+    func=lambda m: m.text == "💳 Buy Credits"
 )
 def buy(m):
-
     markup = types.InlineKeyboardMarkup()
 
     plans = [
@@ -528,13 +477,10 @@ def buy(m):
     ]
 
     for price, credits in plans:
-
         markup.add(
             types.InlineKeyboardButton(
                 f"{credits} Credits - ₦{price}",
-                callback_data=f"""
-buy_{price}_{credits}
-""".strip()
+                callback_data=f"buy_{price}_{credits}"
             )
         )
 
@@ -548,18 +494,14 @@ buy_{price}_{credits}
 # BUY CALLBACK
 # =========================
 @bot.callback_query_handler(
-    func=lambda c:
-    c.data.startswith("buy_")
+    func=lambda c: c.data.startswith("buy_")
 )
 def buy_callback(c):
-
     _, amount, credits = c.data.split("_")
 
     uid = str(c.message.chat.id)
 
-    pending = load(
-        "pending_payments.json"
-    )
+    pending = load("pending_payments.json")
 
     pending[uid] = {
         "amount": int(amount),
@@ -567,13 +509,9 @@ def buy_callback(c):
         "time": str(datetime.now())
     }
 
-    save(
-        "pending_payments.json",
-        pending
-    )
+    save("pending_payments.json", pending)
 
     markup = types.InlineKeyboardMarkup()
-
     markup.add(
         types.InlineKeyboardButton(
             "✅ I HAVE PAID",
@@ -610,19 +548,14 @@ Account Name:
 # USER PAID
 # =========================
 @bot.callback_query_handler(
-    func=lambda c:
-    c.data.startswith("paid_")
+    func=lambda c: c.data.startswith("paid_")
 )
 def user_paid(c):
-
     uid = c.data.split("_")[1]
 
-    pending = load(
-        "pending_payments.json"
-    )
+    pending = load("pending_payments.json")
 
     if uid not in pending:
-
         return bot.answer_callback_query(
             c.id,
             "No pending payment found"
@@ -641,7 +574,6 @@ def user_paid(c):
     full_name = user.first_name
 
     markup = types.InlineKeyboardMarkup()
-
     markup.row(
         types.InlineKeyboardButton(
             "✅ APPROVE",
@@ -688,14 +620,10 @@ def user_paid(c):
 # ADMIN ACTION
 # =========================
 @bot.callback_query_handler(
-    func=lambda c:
-    c.data.startswith("approve_")
-    or c.data.startswith("reject_")
+    func=lambda c: c.data.startswith("approve_") or c.data.startswith("reject_")
 )
 def admin_action(c):
-
     if c.from_user.id != ADMIN_ID:
-
         return bot.answer_callback_query(
             c.id,
             "Not allowed"
@@ -703,12 +631,9 @@ def admin_action(c):
 
     action, uid = c.data.split("_")
 
-    pending = load(
-        "pending_payments.json"
-    )
+    pending = load("pending_payments.json")
 
     if uid not in pending:
-
         return bot.answer_callback_query(
             c.id,
             "Already processed"
@@ -717,11 +642,7 @@ def admin_action(c):
     data = pending[uid]
 
     if action == "approve":
-
-        add_credit(
-            uid,
-            data["credits"]
-        )
+        add_credit(uid, data["credits"])
 
         bot.send_message(
             uid,
@@ -739,7 +660,6 @@ def admin_action(c):
         )
 
     else:
-
         bot.send_message(
             uid,
             """
@@ -756,99 +676,126 @@ Contact support.
         )
 
     del pending[uid]
+    save("pending_payments.json", pending)
 
-    save(
-        "pending_payments.json",
-        pending
-    )
-
-    bot.answer_callback_query(
-        c.id,
-        "Done"
-    )
+    bot.answer_callback_query(c.id, "Done")
 
 # =========================
-# IMAGE HANDLER
+# IMAGE HANDLER (MULTI-TIMEFRAME)
 # =========================
-@bot.message_handler(
-    content_types=[
-        'photo',
-        'document'
-    ]
-)
+@bot.message_handler(content_types=['photo', 'document'])
 def handle_image(m):
-
     try:
+        uid = str(m.chat.id)
 
+        # Determine file info
         if m.content_type == "photo":
-
-            file_info = bot.get_file(
-                m.photo[-1].file_id
-            )
-
+            file_info = bot.get_file(m.photo[-1].file_id)
         else:
-
-            if not m.document.mime_type.startswith(
-                "image/"
-            ):
-
+            if not m.document.mime_type or not m.document.mime_type.startswith("image/"):
                 return bot.reply_to(
                     m,
                     "❌ Only image files allowed"
                 )
+            file_info = bot.get_file(m.document.file_id)
 
-            file_info = bot.get_file(
-                m.document.file_id
+        state = analysis_state.get(uid)
+
+        # ---------- Not in analysis flow ----------
+        if not state:
+            bot.reply_to(
+                m,
+                """
+📸 To start analysis, first click:
+
+📊 Analyze Market
+""",
+                reply_markup=main_menu()
             )
-
-        uid = str(m.chat.id)
-
-        # PAID USERS
-        if get_credit(uid) > 0:
-
-            if not use_credit(uid):
-
-                return bot.reply_to(
-                    m,
-                    "❌ No credits left"
-                )
-
-            threading.Thread(
-                target=analyze_market,
-                args=(m, file_info)
-            ).start()
-
             return
 
-        # FREE USERS
-        if can_use_free(uid):
+        # ---------- Waiting for Higher Timeframe ----------
+        if state["step"] == "waiting_htf":
+            file = bot.download_file(file_info.file_path)
+            htf_path = f"htf_{m.chat.id}.jpg"
 
-            use_free(uid)
+            with open(htf_path, "wb") as f:
+                f.write(file)
 
-            threading.Thread(
-                target=analyze_market,
-                args=(m, file_info)
-            ).start()
+            analysis_state[uid] = {
+                "step": "waiting_ltf",
+                "htf_path": htf_path
+            }
 
+            bot.send_message(
+                m.chat.id,
+                """
+✅ Higher timeframe received.
+
+📉 Now send the LOWER TIMEFRAME chart.
+
+Recommended:
+• M15
+• M5
+• M1
+"""
+            )
             return
 
-        bot.reply_to(
-            m,
-            """
+        # ---------- Waiting for Lower Timeframe ----------
+        if state["step"] == "waiting_ltf":
+            file = bot.download_file(file_info.file_path)
+            ltf_path = f"ltf_{m.chat.id}.jpg"
+
+            with open(ltf_path, "wb") as f:
+                f.write(file)
+
+            htf_path = state["htf_path"]
+
+            # Clear state immediately
+            analysis_state.pop(uid, None)
+
+            # Check credits / free trial NOW (only when both charts are ready)
+            if get_credit(uid) > 0:
+                if not use_credit(uid):
+                    cleanup_files(htf_path, ltf_path)
+                    return bot.reply_to(
+                        m,
+                        "❌ No credits left",
+                        reply_markup=main_menu()
+                    )
+
+                threading.Thread(
+                    target=analyze_market,
+                    args=(m, htf_path, ltf_path)
+                ).start()
+                return
+
+            if can_use_free(uid):
+                use_free(uid)
+
+                threading.Thread(
+                    target=analyze_market,
+                    args=(m, htf_path, ltf_path)
+                ).start()
+                return
+
+            cleanup_files(htf_path, ltf_path)
+
+            bot.reply_to(
+                m,
+                """
 ❌ Free trial finished.
 
 💳 Buy credits to continue.
 """,
-            reply_markup=main_menu()
-        )
+                reply_markup=main_menu()
+            )
+            return
 
     except Exception as e:
-
-        print(
-            "Image Handler Error:",
-            e
-        )
-
+        print("Image Handler Error:", e)
+        analysis_state.pop(str(m.chat.id), None)
         bot.reply_to(
             m,
             limit_message(),
@@ -859,11 +806,9 @@ def handle_image(m):
 # BALANCE
 # =========================
 @bot.message_handler(
-    func=lambda m:
-    m.text == "💰 My Balance"
+    func=lambda m: m.text == "💰 My Balance"
 )
 def balance(m):
-
     bot.reply_to(
         m,
         f"""
@@ -880,11 +825,9 @@ def balance(m):
 # SUPPORT
 # =========================
 @bot.message_handler(
-    func=lambda m:
-    m.text == "📞 Support"
+    func=lambda m: m.text == "📞 Support"
 )
 def support(m):
-
     bot.reply_to(
         m,
         """
@@ -895,18 +838,32 @@ def support(m):
     )
 
 # =========================
-# ANALYZE BUTTON
+# ANALYZE BUTTON (START MULTI-TIMEFRAME FLOW)
 # =========================
 @bot.message_handler(
-    func=lambda m:
-    m.text == "📊 Analyze Market"
+    func=lambda m: m.text == "📊 Analyze Market"
 )
 def ask_chart(m):
+    uid = str(m.chat.id)
+
+    # Reset any previous incomplete state
+    old_state = analysis_state.pop(uid, None)
+    if old_state and "htf_path" in old_state:
+        cleanup_files(old_state.get("htf_path"))
+
+    analysis_state[uid] = {
+        "step": "waiting_htf"
+    }
 
     bot.reply_to(
         m,
         """
-📸 Send your chart screenshot for analysis.
+📈 Please send the HIGHER TIMEFRAME chart first.
+
+Recommended:
+• D1
+• H4
+• H1
 """,
         reply_markup=main_menu()
     )
@@ -917,13 +874,10 @@ def ask_chart(m):
 broadcast_mode = {}
 
 @bot.message_handler(
-    func=lambda m:
-    m.text == "📢 Broadcast"
+    func=lambda m: m.text == "📢 Broadcast"
 )
 def broadcast(m):
-
     if m.chat.id != ADMIN_ID:
-
         return bot.reply_to(
             m,
             "❌ Admin only."
@@ -939,11 +893,9 @@ def broadcast(m):
     )
 
 @bot.message_handler(
-    func=lambda m:
-    broadcast_mode.get(m.chat.id)
+    func=lambda m: broadcast_mode.get(m.chat.id)
 )
 def send_broadcast(m):
-
     if m.chat.id != ADMIN_ID:
         return
 
@@ -958,9 +910,7 @@ def send_broadcast(m):
     )
 
     for uid in users:
-
         try:
-
             bot.send_message(
                 uid,
                 f"""
@@ -969,13 +919,9 @@ def send_broadcast(m):
 {m.text}
 """
             )
-
             sent += 1
-
             time.sleep(0.1)
-
         except:
-
             failed += 1
 
     broadcast_mode[m.chat.id] = False
@@ -998,16 +944,11 @@ def send_broadcast(m):
 # =========================
 @app.route("/")
 def home():
-
     return "BOT RUNNING"
 
 # =========================
 # RUN BOT
 # =========================
 if __name__ == "__main__":
-
     print("BOT STARTED")
-
-    bot.infinity_polling(
-        skip_pending=True
-            )
+    bot.infinity_polling(skip_pending=True)
