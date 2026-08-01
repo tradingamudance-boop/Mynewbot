@@ -729,7 +729,7 @@ def balance(m):
 def support(m):
     bot.reply_to(
         m,
-        "📞 <b>Support</b>\n\n@Profitpulseai",
+        "📞 <b>Support</b>\n\n@Amudancefx",
         reply_markup=main_menu()
     )
 
