@@ -6,6 +6,7 @@ import json
 import time
 import base64
 import threading
+import random
 from datetime import datetime
 from dotenv import load_dotenv
 from google import genai
@@ -71,6 +72,9 @@ GEMINI_MODEL = "gemini-2.5-flash"
 # Tracks multi-timeframe chart collection per user
 # =========================
 analysis_state = {}
+
+# Session expires after 12 minutes of inactivity
+SESSION_TIMEOUT = 12 * 60
 
 # =========================
 # HELPERS
@@ -170,12 +174,16 @@ def use_free(uid):
     data[uid] = data.get(uid, 0) + 1
     save("free_trial.json", data)
 
+def has_access(uid):
+    """True if user has credits or free trial remaining."""
+    return get_credit(uid) > 0 or can_use_free(uid)
+
 # =========================
 # HUMAN EFFECT
 # =========================
-def human_delay(chat_id, sec=1):
+def human_delay(chat_id, sec=None):
     bot.send_chat_action(chat_id, "typing")
-    time.sleep(sec)
+    time.sleep(sec if sec is not None else random.uniform(0.9, 1.6))
 
 # =========================
 # CLEANUP TEMP FILES
@@ -187,6 +195,38 @@ def cleanup_files(*paths):
                 os.remove(path)
         except:
             pass
+
+# =========================
+# SESSION HELPERS
+# =========================
+def clear_session(uid, notify=False, chat_id=None):
+    """Clear analysis state and optionally notify user."""
+    state = analysis_state.pop(str(uid), None)
+    if state and "htf_path" in state:
+        cleanup_files(state.get("htf_path"))
+    if notify and chat_id:
+        try:
+            bot.send_message(
+                chat_id,
+                "⏱ <b>Session expired</b>\n\n"
+                "Please tap <b>📊 Analyze Market</b> to start again.",
+                reply_markup=main_menu()
+            )
+        except:
+            pass
+
+def is_session_expired(uid):
+    state = analysis_state.get(str(uid))
+    if not state:
+        return False
+    started = state.get("started", 0)
+    return (time.time() - started) > SESSION_TIMEOUT
+
+def refresh_session(uid):
+    """Update timestamp so active users don't expire mid-flow."""
+    state = analysis_state.get(str(uid))
+    if state:
+        state["started"] = time.time()
 
 # =========================
 # GEMINI CALL (MULTI-IMAGE)
@@ -221,90 +261,94 @@ def call_gemini(prompt, image_base64_list):
 def analyze_market(message, htf_path, ltf_path):
     try:
         prompt = """
-You are an elite institutional forex trader and Smart Money Concepts (SMC) / ICT expert working at a top-tier hedge fund.
+You are a senior proprietary desk trader specialising in Smart Money Concepts (SMC) and ICT.
 
-You will receive TWO charts in this exact order:
-1. HIGHER TIMEFRAME chart (HTF)
-2. LOWER TIMEFRAME chart (LTF)
+You receive TWO charts in this exact order:
+1. HIGHER TIMEFRAME (HTF) — primary bias
+2. LOWER TIMEFRAME (LTF) — confirmation and entry only
 
-STRICT ANALYSIS ORDER:
+ANALYSIS ORDER (strict):
 
-STEP 1 — HIGHER TIMEFRAME (Primary Bias)
-- Determine overall trend and institutional bias
-- Identify Market Structure (HH, HL, LH, LL)
-- Detect Break of Structure (BOS) and Change of Character (CHoCH)
-- Map major Liquidity pools (Equal Highs/Lows, buy-side & sell-side liquidity)
-- Identify Order Blocks (bullish & bearish)
-- Spot Fair Value Gaps (FVG / Imbalances)
-- Determine Premium / Discount zones relative to the dealing range
-- Note any Breaker Blocks, Mitigation Blocks, or Inducement
-- Assess Institutional Order Flow
+STEP 1 — HTF (Primary Bias)
+- Overall trend and institutional bias
+- Market Structure (HH, HL, LH, LL)
+- BOS and CHoCH
+- Major liquidity (equal highs/lows, buy-side & sell-side)
+- Order Blocks, Fair Value Gaps, Breaker / Mitigation Blocks
+- Premium / Discount relative to the dealing range
+- Inducement and institutional order flow
+- Note the trading session if visible (Asian / London / New York)
 
-STEP 2 — LOWER TIMEFRAME (Confirmation & Entry Only)
-- Use LTF strictly for confirmation of the HTF bias and precise entry
-- Look for alignment: LTF structure, liquidity sweep, order block, FVG, or inducement that supports the HTF direction
-- If LTF shows clear opposing structure or strong counter bias → NO TRADE
+STEP 2 — LTF (Confirmation & Entry only)
+- Use LTF only to confirm HTF bias and locate precise entry
+- Look for liquidity sweep, order block, FVG, or inducement that aligns with HTF
+- If LTF shows opposing structure or strong counter-bias → NO TRADE
 
-CRITICAL RULES:
-- Accuracy is more important than frequency
-- NEVER force a trade
-- If HTF and LTF disagree → Return NO TRADE ⛔
-- If setup is weak, unclear, low probability, or missing clear entry/SL/TP → Return NO TRADE ⛔
-- Do not guess. If confidence is not high enough for a clean institutional setup → NO TRADE
-- Only give BUY or SELL when both timeframes align and a high-probability setup is present
+HARD RULES (never break these):
+- Accuracy over frequency. Never force a trade.
+- If HTF and LTF disagree → NO TRADE ⛔
+- If the setup is weak, unclear, or missing a clean entry / SL / TP → NO TRADE ⛔
+- NO CHASE: If price has already run a large portion of the expected move, or the only available entry is after a strong impulsive candle with no pullback → NO TRADE ⛔
+- Prefer waiting for a return to a point of interest (OB / FVG / mitigation) rather than chasing.
+- Prefer high-probability setups during London and New York. Be more selective in dead Asian ranges.
+- Do not invent levels. If you cannot determine accurate Entry, SL and TPs → NO TRADE.
+
+WRITING STYLE:
+- Write like a senior prop-desk analyst briefing a colleague.
+- Never say “As an AI”, “Based on the chart provided”, or similar.
+- Be direct, precise and calm.
+- Professional Advice must be 2–3 short lines maximum.
+- When signal is NO TRADE, state the main reason in one clear sentence first.
 
 OUTPUT RULES:
 - DO NOT use markdown symbols like ** or *
-- Use clean Telegram-friendly formatting
-- Use professional emojis correctly
-- Keep spacing clean and premium
-- Sound like a professional hedge fund analyst
-- Be direct and precise
-- Always give one final signal: BUY / SELL / NO TRADE
+- Clean Telegram-friendly formatting only
+- Professional emojis, clean spacing
+- Always give exactly one final signal: BUY / SELL / NO TRADE
 
-STRICT OUTPUT FORMAT (follow exactly):
+STRICT OUTPUT FORMAT:
 
 ━━━━━━━━━━━━━━━━━━
-🚀 AMUDANCE FX
+🚀 PROFITPULSE AI
 ━━━━━━━━━━━━━━━━━━
 
 📈 MARKET ANALYSIS
 
 🕒 Higher Timeframe Bias
-(Explain HTF structure, trend, and institutional bias clearly)
+(Clear HTF structure, trend and institutional bias)
 
 🕒 Lower Timeframe Confirmation
-(Explain whether LTF confirms or rejects the HTF bias)
+(Does LTF confirm or reject the HTF bias?)
 
 📊 Market Direction
 Bullish 📈 / Bearish 📉 / Ranging 🔄
 
 🏗 Market Structure
-(Explain BOS / CHoCH on both timeframes simply)
+(BOS / CHoCH on both timeframes, simply)
 
 💧 Liquidity Analysis
-(Major liquidity pools, equal highs/lows, inducement)
+(Major pools, equal highs/lows, inducement)
 
 🏦 Institutional Bias
-(Smart money direction based on HTF)
+(Smart money direction from HTF)
 
 📦 Order Blocks
-(Key bullish/bearish order blocks relevant to the setup)
+(Key relevant OBs)
 
 🟨 Fair Value Gap
-(Relevant FVGs that may act as targets or entries)
+(Relevant FVGs)
 
 📍 Premium / Discount
-(Where price is relative to the dealing range)
+(Where price sits in the dealing range)
 
 🎯 Trade Setup
-(Clear explanation of the setup)
+(Clear explanation — or why there is none)
 
 📥 Entry Zone
-(Exact zone or level)
+(Exact zone/level — or N/A if NO TRADE)
 
 🛑 Stop Loss
-(Exact level)
+(Exact level — or N/A if NO TRADE)
 
 💰 Take Profit
 TP1:
@@ -312,10 +356,10 @@ TP2:
 TP3:
 
 ⚖️ Risk : Reward
-(e.g. 1:2, 1:3, etc.)
+(e.g. 1:2 — or N/A if NO TRADE)
 
 🔥 Confidence (%)
-(e.g. 75%)
+(e.g. 75% — or Low if NO TRADE)
 
 ⚠️ Risk Level
 Low / Moderate / High
@@ -327,29 +371,24 @@ or
 NO TRADE ⛔
 
 🧠 Professional Advice
-(Short professional advice)
+(2–3 short lines max. If NO TRADE, state the main reason clearly.)
 
 ━━━━━━━━━━━━━━━━━━
-⚠️ Trade Responsibly
+⚠️ Trade responsibly. This is analysis, not financial advice.
 ━━━━━━━━━━━━━━━━━━
-
-If the final signal is NO TRADE, still fill the analysis sections honestly but clearly state why no trade is taken. Do not invent entry, SL, or TP levels when the signal is NO TRADE.
 """
 
-        bot.send_message(message.chat.id, "📡 Both charts received...")
-        human_delay(message.chat.id)
+        # Slightly varied progress messages for realism
+        steps = [
+            "📡 Charts received",
+            "🧠 Reading higher timeframe structure…",
+            "📉 Checking lower timeframe for confirmation…",
+            "🏦 Mapping liquidity and institutional flow…"
+        ]
 
-        bot.send_message(message.chat.id, "🧠 Analyzing Higher Timeframe bias...")
-        human_delay(message.chat.id)
-
-        bot.send_message(message.chat.id, "📉 Checking Lower Timeframe confirmation...")
-        human_delay(message.chat.id)
-
-        bot.send_message(message.chat.id, "📊 Mapping structure & liquidity...")
-        human_delay(message.chat.id)
-
-        bot.send_message(message.chat.id, "🏦 Tracking institutional order flow...")
-        human_delay(message.chat.id)
+        for step in steps:
+            bot.send_message(message.chat.id, step)
+            human_delay(message.chat.id)
 
         image_base64_list = []
 
@@ -371,6 +410,14 @@ If the final signal is NO TRADE, still fill the analysis sections honestly but c
 
         safe_send(message.chat.id, result, reply_markup=main_menu())
 
+        # Soft reminder when credits are running low
+        remaining = get_credit(message.chat.id)
+        if 0 < remaining <= 2:
+            bot.send_message(
+                message.chat.id,
+                f"💎 You have <b>{remaining}</b> credit{'s' if remaining != 1 else ''} left."
+            )
+
     except Exception as e:
         print("Analysis Error:", e)
         bot.send_message(
@@ -388,15 +435,15 @@ If the final signal is NO TRADE, still fill the analysis sections honestly but c
 @bot.message_handler(commands=['start'])
 def start(m):
     register_user(m.chat.id)
-    analysis_state.pop(str(m.chat.id), None)
+    clear_session(m.chat.id)
 
     bot.send_message(
         m.chat.id,
         f"""━━━━━━━━━━━━━━━━━━
-🚀 <b>AMUDANCE FX</b>
+🚀 <b>PROFITPULSE AI</b>
 ━━━━━━━━━━━━━━━━━━
 
-Professional Market Analysis
+Professional Multi-Timeframe Analysis
 
 💎 Credits: <b>{get_credit(m.chat.id)}</b>
 🎁 Free Trial Left: <b>{FREE_LIMIT - get_free_used(m.chat.id)}</b>
@@ -536,7 +583,7 @@ def admin_action(c):
             uid,
             f"""✅ <b>PAYMENT APPROVED</b>
 
-{data['credits']} credits have been added to your account.
+{data['credits']} credits added successfully.
 You can now run multi-timeframe analysis.""",
             reply_markup=main_menu()
         )
@@ -562,6 +609,11 @@ Please contact support if you believe this is an error.""",
 def handle_image(m):
     try:
         uid = str(m.chat.id)
+
+        # Expire stale sessions first
+        if is_session_expired(uid):
+            clear_session(uid, notify=True, chat_id=m.chat.id)
+            return
 
         if m.content_type == "photo":
             file_info = bot.get_file(m.photo[-1].file_id)
@@ -591,7 +643,8 @@ def handle_image(m):
 
             analysis_state[uid] = {
                 "step": "waiting_ltf",
-                "htf_path": htf_path
+                "htf_path": htf_path,
+                "started": time.time()
             }
 
             bot.send_message(
@@ -618,7 +671,7 @@ Recommended:
             htf_path = state["htf_path"]
             analysis_state.pop(uid, None)
 
-            # Deduct credit / free trial only when both charts are ready
+            # Deduct only when both charts are ready
             if get_credit(uid) > 0:
                 if not use_credit(uid):
                     cleanup_files(htf_path, ltf_path)
@@ -676,7 +729,7 @@ def balance(m):
 def support(m):
     bot.reply_to(
         m,
-        "📞 <b>Support</b>\n\n@Amudancefx",
+        "📞 <b>Support</b>\n\n@Profitpulseai",
         reply_markup=main_menu()
     )
 
@@ -687,15 +740,28 @@ def support(m):
 def ask_chart(m):
     uid = str(m.chat.id)
 
-    old_state = analysis_state.pop(uid, None)
-    if old_state and "htf_path" in old_state:
-        cleanup_files(old_state.get("htf_path"))
+    # Clear any previous incomplete session
+    clear_session(uid)
 
-    analysis_state[uid] = {"step": "waiting_htf"}
+    # Block early if user has no access
+    if not has_access(uid):
+        bot.reply_to(
+            m,
+            """❌ <b>No credits remaining</b>
+
+Buy credits to run multi-timeframe analysis.""",
+            reply_markup=main_menu()
+        )
+        return
+
+    analysis_state[uid] = {
+        "step": "waiting_htf",
+        "started": time.time()
+    }
 
     bot.reply_to(
         m,
-        """📈 <b>Please send the HIGHER TIMEFRAME chart first.</b>
+        """📈 <b>Send the HIGHER TIMEFRAME chart first</b>
 
 Recommended:
 • D1
@@ -726,7 +792,7 @@ def send_broadcast(m):
     sent = 0
     failed = 0
 
-    bot.reply_to(m, "📡 Broadcasting...")
+    bot.reply_to(m, "📡 Broadcasting…")
 
     for uid in users:
         try:
