@@ -102,20 +102,10 @@ def register_user(uid):
 # MAIN MENU
 # =========================
 def main_menu():
-    markup = types.ReplyKeyboardMarkup(
-        resize_keyboard=True
-    )
-    markup.row(
-        "📊 Analyze Market",
-        "💳 Buy Credits"
-    )
-    markup.row(
-        "💰 My Balance",
-        "📞 Support"
-    )
-    markup.row(
-        "📢 Broadcast"
-    )
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row("📊 Analyze Market", "💳 Buy Credits")
+    markup.row("💰 My Balance", "📞 Support")
+    markup.row("📢 Broadcast")
     return markup
 
 # =========================
@@ -123,35 +113,23 @@ def main_menu():
 # =========================
 def limit_message():
     return (
-        "⚠️ Server busy or analysis temporarily unavailable.\n\n"
-        "Please try again later."
+        "⚠️ <b>Analysis Unavailable</b>\n\n"
+        "Server is busy or temporarily unavailable.\n"
+        "Please try again shortly."
     )
 
 # =========================
 # SAFE SEND
-# FIX TOO LONG ERROR
 # =========================
 def safe_send(chat_id, text, reply_markup=None):
     MAX = 4000
     if len(text) <= MAX:
-        bot.send_message(
-            chat_id,
-            text,
-            reply_markup=reply_markup
-        )
+        bot.send_message(chat_id, text, reply_markup=reply_markup)
         return
 
-    parts = [
-        text[i:i + MAX]
-        for i in range(0, len(text), MAX)
-    ]
-
+    parts = [text[i:i + MAX] for i in range(0, len(text), MAX)]
     for part in parts:
-        bot.send_message(
-            chat_id,
-            part,
-            reply_markup=reply_markup
-        )
+        bot.send_message(chat_id, part, reply_markup=reply_markup)
 
 # =========================
 # CREDIT SYSTEM
@@ -176,7 +154,6 @@ def use_credit(uid):
 
 # =========================
 # FREE TRIAL
-# FIRST TIME ONLY
 # =========================
 FREE_LIMIT = 1
 
@@ -359,47 +336,28 @@ NO TRADE ⛔
 If the final signal is NO TRADE, still fill the analysis sections honestly but clearly state why no trade is taken. Do not invent entry, SL, or TP levels when the signal is NO TRADE.
 """
 
-        bot.send_message(
-            message.chat.id,
-            "📡 Both charts received..."
-        )
+        bot.send_message(message.chat.id, "📡 Both charts received...")
         human_delay(message.chat.id)
 
-        bot.send_message(
-            message.chat.id,
-            "🧠 Analyzing Higher Timeframe bias..."
-        )
+        bot.send_message(message.chat.id, "🧠 Analyzing Higher Timeframe bias...")
         human_delay(message.chat.id)
 
-        bot.send_message(
-            message.chat.id,
-            "📉 Checking Lower Timeframe confirmation..."
-        )
+        bot.send_message(message.chat.id, "📉 Checking Lower Timeframe confirmation...")
         human_delay(message.chat.id)
 
-        bot.send_message(
-            message.chat.id,
-            "📊 Mapping market structure & liquidity..."
-        )
+        bot.send_message(message.chat.id, "📊 Mapping structure & liquidity...")
         human_delay(message.chat.id)
 
-        bot.send_message(
-            message.chat.id,
-            "🏦 Tracking institutional order flow..."
-        )
+        bot.send_message(message.chat.id, "🏦 Tracking institutional order flow...")
         human_delay(message.chat.id)
 
         image_base64_list = []
 
         with open(htf_path, "rb") as f:
-            image_base64_list.append(
-                base64.b64encode(f.read()).decode()
-            )
+            image_base64_list.append(base64.b64encode(f.read()).decode())
 
         with open(ltf_path, "rb") as f:
-            image_base64_list.append(
-                base64.b64encode(f.read()).decode()
-            )
+            image_base64_list.append(base64.b64encode(f.read()).decode())
 
         result = call_gemini(prompt, image_base64_list)
 
@@ -411,11 +369,7 @@ If the final signal is NO TRADE, still fill the analysis sections honestly but c
             )
             return
 
-        safe_send(
-            message.chat.id,
-            result,
-            reply_markup=main_menu()
-        )
+        safe_send(message.chat.id, result, reply_markup=main_menu())
 
     except Exception as e:
         print("Analysis Error:", e)
@@ -434,36 +388,27 @@ If the final signal is NO TRADE, still fill the analysis sections honestly but c
 @bot.message_handler(commands=['start'])
 def start(m):
     register_user(m.chat.id)
-
-    # Clear any incomplete analysis state
     analysis_state.pop(str(m.chat.id), None)
 
     bot.send_message(
         m.chat.id,
-        f"""
+        f"""━━━━━━━━━━━━━━━━━━
+🚀 <b>AMUDANCE FX</b>
 ━━━━━━━━━━━━━━━━━━
-🚀 AMUDANCE FX
-━━━━━━━━━━━━━━━━━━
 
-📊 Professional Market Analysis
+Professional Market Analysis
 
-💎 Credits:
-{get_credit(m.chat.id)}
+💎 Credits: <b>{get_credit(m.chat.id)}</b>
+🎁 Free Trial Left: <b>{FREE_LIMIT - get_free_used(m.chat.id)}</b>
 
-🎁 Free Trial Left:
-{FREE_LIMIT - get_free_used(m.chat.id)}
-
-Choose an option below 👇
-""",
+Choose an option below 👇""",
         reply_markup=main_menu()
     )
 
 # =========================
 # BUY CREDITS
 # =========================
-@bot.message_handler(
-    func=lambda m: m.text == "💳 Buy Credits"
-)
+@bot.message_handler(func=lambda m: m.text == "💳 Buy Credits")
 def buy(m):
     markup = types.InlineKeyboardMarkup()
 
@@ -479,36 +424,31 @@ def buy(m):
     for price, credits in plans:
         markup.add(
             types.InlineKeyboardButton(
-                f"{credits} Credits - ₦{price}",
+                f"{credits} Credits — ₦{price}",
                 callback_data=f"buy_{price}_{credits}"
             )
         )
 
     bot.send_message(
         m.chat.id,
-        "💎 Choose your credit plan:",
+        "💎 <b>Select a credit plan</b>",
         reply_markup=markup
     )
 
 # =========================
 # BUY CALLBACK
 # =========================
-@bot.callback_query_handler(
-    func=lambda c: c.data.startswith("buy_")
-)
+@bot.callback_query_handler(func=lambda c: c.data.startswith("buy_"))
 def buy_callback(c):
     _, amount, credits = c.data.split("_")
-
     uid = str(c.message.chat.id)
 
     pending = load("pending_payments.json")
-
     pending[uid] = {
         "amount": int(amount),
         "credits": int(credits),
         "time": str(datetime.now())
     }
-
     save("pending_payments.json", pending)
 
     markup = types.InlineKeyboardMarkup()
@@ -521,100 +461,56 @@ def buy_callback(c):
 
     bot.send_message(
         uid,
-        f"""
-🏦 PAYMENT DETAILS
+        f"""🏦 <b>PAYMENT DETAILS</b>
 
-Bank:
-{BANK_NAME}
+Bank: <b>{BANK_NAME}</b>
+Account Number: <code>{ACCOUNT_NUMBER}</code>
+Account Name: <b>{ACCOUNT_NAME}</b>
 
-Account Number:
-{ACCOUNT_NUMBER}
+💰 Amount: <b>₦{amount}</b>
+💎 Credits: <b>{credits}</b>
 
-Account Name:
-{ACCOUNT_NAME}
-
-💰 Amount:
-₦{amount}
-
-💎 Credits:
-{credits}
-
-⚠️ After payment click the button below.
-""",
+After payment, tap the button below.""",
         reply_markup=markup
     )
 
 # =========================
 # USER PAID
 # =========================
-@bot.callback_query_handler(
-    func=lambda c: c.data.startswith("paid_")
-)
+@bot.callback_query_handler(func=lambda c: c.data.startswith("paid_"))
 def user_paid(c):
     uid = c.data.split("_")[1]
-
     pending = load("pending_payments.json")
 
     if uid not in pending:
-        return bot.answer_callback_query(
-            c.id,
-            "No pending payment found"
-        )
+        return bot.answer_callback_query(c.id, "No pending payment found")
 
     data = pending[uid]
-
     user = bot.get_chat(uid)
-
-    username = (
-        f"@{user.username}"
-        if user.username
-        else "No Username"
-    )
-
+    username = f"@{user.username}" if user.username else "No Username"
     full_name = user.first_name
 
     markup = types.InlineKeyboardMarkup()
     markup.row(
-        types.InlineKeyboardButton(
-            "✅ APPROVE",
-            callback_data=f"approve_{uid}"
-        ),
-        types.InlineKeyboardButton(
-            "❌ REJECT",
-            callback_data=f"reject_{uid}"
-        )
+        types.InlineKeyboardButton("✅ APPROVE", callback_data=f"approve_{uid}"),
+        types.InlineKeyboardButton("❌ REJECT", callback_data=f"reject_{uid}")
     )
 
     bot.send_message(
         ADMIN_ID,
-        f"""
-💰 PAYMENT REQUEST
+        f"""💰 <b>PAYMENT REQUEST</b>
 
-👤 Name:
-{full_name}
+👤 Name: {full_name}
+🆔 User ID: <code>{uid}</code>
+🌐 Username: {username}
 
-🆔 User ID:
-{uid}
-
-🌐 Username:
-{username}
-
-💵 Amount:
-₦{data['amount']}
-
-💎 Credits:
-{data['credits']}
-
-🕒 Time:
-{data['time']}
-""",
+💵 Amount: ₦{data['amount']}
+💎 Credits: {data['credits']}
+🕒 Time: {data['time']}""",
         reply_markup=markup
     )
 
-    bot.answer_callback_query(
-        c.id,
-        "Payment sent for review ✅"
-    )
+    bot.answer_callback_query(c.id, "Payment sent for review ✅")
 
 # =========================
 # ADMIN ACTION
@@ -624,60 +520,39 @@ def user_paid(c):
 )
 def admin_action(c):
     if c.from_user.id != ADMIN_ID:
-        return bot.answer_callback_query(
-            c.id,
-            "Not allowed"
-        )
+        return bot.answer_callback_query(c.id, "Not allowed")
 
     action, uid = c.data.split("_")
-
     pending = load("pending_payments.json")
 
     if uid not in pending:
-        return bot.answer_callback_query(
-            c.id,
-            "Already processed"
-        )
+        return bot.answer_callback_query(c.id, "Already processed")
 
     data = pending[uid]
 
     if action == "approve":
         add_credit(uid, data["credits"])
-
         bot.send_message(
             uid,
-            f"""
-✅ PAYMENT APPROVED
+            f"""✅ <b>PAYMENT APPROVED</b>
 
-🎉 {data['credits']} credits added successfully.
-""",
+{data['credits']} credits have been added to your account.
+You can now run multi-timeframe analysis.""",
             reply_markup=main_menu()
         )
-
-        bot.send_message(
-            ADMIN_ID,
-            "✅ Payment approved"
-        )
-
+        bot.send_message(ADMIN_ID, "✅ Payment approved")
     else:
         bot.send_message(
             uid,
-            """
-❌ Payment rejected.
+            """❌ <b>Payment Rejected</b>
 
-Contact support.
-""",
+Please contact support if you believe this is an error.""",
             reply_markup=main_menu()
         )
-
-        bot.send_message(
-            ADMIN_ID,
-            "❌ Payment rejected"
-        )
+        bot.send_message(ADMIN_ID, "❌ Payment rejected")
 
     del pending[uid]
     save("pending_payments.json", pending)
-
     bot.answer_callback_query(c.id, "Done")
 
 # =========================
@@ -688,33 +563,25 @@ def handle_image(m):
     try:
         uid = str(m.chat.id)
 
-        # Determine file info
         if m.content_type == "photo":
             file_info = bot.get_file(m.photo[-1].file_id)
         else:
             if not m.document.mime_type or not m.document.mime_type.startswith("image/"):
-                return bot.reply_to(
-                    m,
-                    "❌ Only image files allowed"
-                )
+                return bot.reply_to(m, "❌ Only image files are allowed.")
             file_info = bot.get_file(m.document.file_id)
 
         state = analysis_state.get(uid)
 
-        # ---------- Not in analysis flow ----------
+        # Not in analysis flow
         if not state:
             bot.reply_to(
                 m,
-                """
-📸 To start analysis, first click:
-
-📊 Analyze Market
-""",
+                "📸 To start analysis, first tap:\n\n<b>📊 Analyze Market</b>",
                 reply_markup=main_menu()
             )
             return
 
-        # ---------- Waiting for Higher Timeframe ----------
+        # Waiting for Higher Timeframe
         if state["step"] == "waiting_htf":
             file = bot.download_file(file_info.file_path)
             htf_path = f"htf_{m.chat.id}.jpg"
@@ -729,20 +596,18 @@ def handle_image(m):
 
             bot.send_message(
                 m.chat.id,
-                """
-✅ Higher timeframe received.
+                """✅ <b>Higher timeframe received</b>
 
-📉 Now send the LOWER TIMEFRAME chart.
+📉 Now send the <b>LOWER TIMEFRAME</b> chart.
 
 Recommended:
 • M15
 • M5
-• M1
-"""
+• M1"""
             )
             return
 
-        # ---------- Waiting for Lower Timeframe ----------
+        # Waiting for Lower Timeframe
         if state["step"] == "waiting_ltf":
             file = bot.download_file(file_info.file_path)
             ltf_path = f"ltf_{m.chat.id}.jpg"
@@ -751,17 +616,15 @@ Recommended:
                 f.write(file)
 
             htf_path = state["htf_path"]
-
-            # Clear state immediately
             analysis_state.pop(uid, None)
 
-            # Check credits / free trial NOW (only when both charts are ready)
+            # Deduct credit / free trial only when both charts are ready
             if get_credit(uid) > 0:
                 if not use_credit(uid):
                     cleanup_files(htf_path, ltf_path)
                     return bot.reply_to(
                         m,
-                        "❌ No credits left",
+                        "❌ No credits left.\n\nBuy credits to continue.",
                         reply_markup=main_menu()
                     )
 
@@ -773,7 +636,6 @@ Recommended:
 
             if can_use_free(uid):
                 use_free(uid)
-
                 threading.Thread(
                     target=analyze_market,
                     args=(m, htf_path, ltf_path)
@@ -781,14 +643,11 @@ Recommended:
                 return
 
             cleanup_files(htf_path, ltf_path)
-
             bot.reply_to(
                 m,
-                """
-❌ Free trial finished.
+                """❌ <b>Free trial finished</b>
 
-💳 Buy credits to continue.
-""",
+Buy credits to continue analysis.""",
                 reply_markup=main_menu()
             )
             return
@@ -796,75 +655,52 @@ Recommended:
     except Exception as e:
         print("Image Handler Error:", e)
         analysis_state.pop(str(m.chat.id), None)
-        bot.reply_to(
-            m,
-            limit_message(),
-            reply_markup=main_menu()
-        )
+        bot.reply_to(m, limit_message(), reply_markup=main_menu())
 
 # =========================
 # BALANCE
 # =========================
-@bot.message_handler(
-    func=lambda m: m.text == "💰 My Balance"
-)
+@bot.message_handler(func=lambda m: m.text == "💰 My Balance")
 def balance(m):
     bot.reply_to(
         m,
-        f"""
-💎 Credits:
-{get_credit(m.chat.id)}
-
-🎁 Free Trial Left:
-{FREE_LIMIT - get_free_used(m.chat.id)}
-""",
+        f"""💎 Credits: <b>{get_credit(m.chat.id)}</b>
+🎁 Free Trial Left: <b>{FREE_LIMIT - get_free_used(m.chat.id)}</b>""",
         reply_markup=main_menu()
     )
 
 # =========================
 # SUPPORT
 # =========================
-@bot.message_handler(
-    func=lambda m: m.text == "📞 Support"
-)
+@bot.message_handler(func=lambda m: m.text == "📞 Support")
 def support(m):
     bot.reply_to(
         m,
-        """
-📞 Support:
-@Amudancefx
-""",
+        "📞 <b>Support</b>\n\n@Amudancefx",
         reply_markup=main_menu()
     )
 
 # =========================
 # ANALYZE BUTTON (START MULTI-TIMEFRAME FLOW)
 # =========================
-@bot.message_handler(
-    func=lambda m: m.text == "📊 Analyze Market"
-)
+@bot.message_handler(func=lambda m: m.text == "📊 Analyze Market")
 def ask_chart(m):
     uid = str(m.chat.id)
 
-    # Reset any previous incomplete state
     old_state = analysis_state.pop(uid, None)
     if old_state and "htf_path" in old_state:
         cleanup_files(old_state.get("htf_path"))
 
-    analysis_state[uid] = {
-        "step": "waiting_htf"
-    }
+    analysis_state[uid] = {"step": "waiting_htf"}
 
     bot.reply_to(
         m,
-        """
-📈 Please send the HIGHER TIMEFRAME chart first.
+        """📈 <b>Please send the HIGHER TIMEFRAME chart first.</b>
 
 Recommended:
 • D1
 • H4
-• H1
-""",
+• H1""",
         reply_markup=main_menu()
     )
 
@@ -873,51 +709,32 @@ Recommended:
 # =========================
 broadcast_mode = {}
 
-@bot.message_handler(
-    func=lambda m: m.text == "📢 Broadcast"
-)
+@bot.message_handler(func=lambda m: m.text == "📢 Broadcast")
 def broadcast(m):
     if m.chat.id != ADMIN_ID:
-        return bot.reply_to(
-            m,
-            "❌ Admin only."
-        )
+        return bot.reply_to(m, "❌ Admin only.")
 
     broadcast_mode[m.chat.id] = True
+    bot.reply_to(m, "📢 Send your announcement now.")
 
-    bot.reply_to(
-        m,
-        """
-📢 Send your announcement now.
-"""
-    )
-
-@bot.message_handler(
-    func=lambda m: broadcast_mode.get(m.chat.id)
-)
+@bot.message_handler(func=lambda m: broadcast_mode.get(m.chat.id))
 def send_broadcast(m):
     if m.chat.id != ADMIN_ID:
         return
 
     users = load("users.json")
-
     sent = 0
     failed = 0
 
-    bot.reply_to(
-        m,
-        "📡 Broadcasting message..."
-    )
+    bot.reply_to(m, "📡 Broadcasting...")
 
     for uid in users:
         try:
             bot.send_message(
                 uid,
-                f"""
-📢 ANNOUNCEMENT
+                f"""📢 <b>ANNOUNCEMENT</b>
 
-{m.text}
-"""
+{m.text}"""
             )
             sent += 1
             time.sleep(0.1)
@@ -928,15 +745,10 @@ def send_broadcast(m):
 
     bot.send_message(
         ADMIN_ID,
-        f"""
-✅ Broadcast Completed
+        f"""✅ <b>Broadcast Completed</b>
 
-👥 Sent:
-{sent}
-
-❌ Failed:
-{failed}
-"""
+👥 Sent: {sent}
+❌ Failed: {failed}"""
     )
 
 # =========================
